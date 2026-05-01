@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WrapStudio Pro</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d0d20'/%3E%3Crect x='3' y='14' width='26' height='10' rx='3' fill='%236366f1'/%3E%3Crect x='7' y='10' width='14' height='8' rx='2' fill='%23818cf8'/%3E%3Ccircle cx='8' cy='25' r='3' fill='%23222'/%3E%3Ccircle cx='8' cy='25' r='1.5' fill='%23555'/%3E%3Ccircle cx='24' cy='25' r='3' fill='%23222'/%3E%3Ccircle cx='24' cy='25' r='1.5' fill='%23555'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+<div id="app">
+    <header class="top-bar">
+        <div class="logo">
+            <i class="fas fa-car-side"></i>
+            <span>WrapStudio <strong>Pro</strong></span>
+        </div>
+        <div class="view-toggle">
+            <button class="view-btn active" data-mode="2d"><i class="fas fa-image"></i> 2D</button>
+            <button class="view-btn" data-mode="3d"><i class="fas fa-cube"></i> 3D</button>
+        </div>
+        <div class="header-actions">
+            <button id="btn-undo" class="btn btn-ghost btn-sm" title="Angre"><i class="fas fa-undo"></i></button>
+            <button id="btn-reset" class="btn btn-ghost btn-sm" title="Nullstill"><i class="fas fa-trash-alt"></i> Reset</button>
+            <button id="btn-export" class="btn btn-primary btn-sm"><i class="fas fa-camera"></i> Eksporter</button>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <!-- ===== SIDE PANEL ===== -->
+        <aside class="side-panel">
+
+            <!-- Car view selector -->
+            <div class="panel-section">
+                <h3><i class="fas fa-car"></i> Velg side</h3>
+                <div class="car-thumbs" id="car-thumbs"></div>
+            </div>
+
+            <!-- Wrap color -->
+            <div class="panel-section">
+                <h3><i class="fas fa-fill-drip"></i> Wrap-farge</h3>
+                <div class="color-row">
+                    <label class="color-swatch">
+                        <input type="color" id="wrap-color" value="#cc0000">
+                        <span>Farge</span>
+                    </label>
+                    <div class="quick-colors" id="quick-colors">
+                        <div class="qc" data-color="#cc0000" style="background:#cc0000"></div>
+                        <div class="qc" data-color="#0044cc" style="background:#0044cc"></div>
+                        <div class="qc" data-color="#00aa44" style="background:#00aa44"></div>
+                        <div class="qc" data-color="#ff8800" style="background:#ff8800"></div>
+                        <div class="qc" data-color="#222222" style="background:#222222"></div>
+                        <div class="qc" data-color="#ffdd00" style="background:#ffdd00"></div>
+                        <div class="qc" data-color="#8800cc" style="background:#8800cc"></div>
+                        <div class="qc" data-color="#ffffff" style="background:#ffffff;border:1px solid #555"></div>
+                    </div>
+                </div>
+                <div class="gradient-extra hidden" id="gradient-extra">
+                    <label class="color-swatch small">
+                        <input type="color" id="wrap-color2" value="#0044cc">
+                        <span>Farge 2</span>
+                    </label>
+                    <select id="grad-dir" title="Gradientretning">
+                        <option value="h">→ Horisontal</option>
+                        <option value="v">↓ Vertikal</option>
+                        <option value="d">↘ Diagonal</option>
+                        <option value="r">◉ Radial</option>
+                    </select>
+                </div>
+                <div class="slider-row">
+                    <label>Opacity</label>
+                    <input type="range" id="wrap-opacity" min="10" max="100" value="85">
+                    <span id="wrap-opacity-val">85%</span>
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-primary btn-sm flex1" id="btn-apply-color"><i class="fas fa-fill"></i> Legg på</button>
+                    <button class="btn btn-ghost btn-sm" id="btn-clear-wrap"><i class="fas fa-times"></i> Fjern</button>
+                </div>
+            </div>
+
+            <!-- Vinyl patterns -->
+            <div class="panel-section">
+                <h3><i class="fas fa-th"></i> Vinyl / Mønster</h3>
+                <div class="pattern-grid">
+                    <button class="pattern-btn" data-pattern="carbon"><span class="pat-preview carbon"></span>Carbon</button>
+                    <button class="pattern-btn" data-pattern="matte"><span class="pat-preview matte"></span>Matte</button>
+                    <button class="pattern-btn" data-pattern="gloss"><span class="pat-preview gloss"></span>Gloss</button>
+                    <button class="pattern-btn" data-pattern="gradient"><span class="pat-preview gradient"></span>Gradient</button>
+                    <button class="pattern-btn" data-pattern="stripes"><span class="pat-preview stripes"></span>Stripes</button>
+                    <button class="pattern-btn" data-pattern="camo"><span class="pat-preview camo"></span>Camo</button>
+                    <button class="pattern-btn" data-pattern="checker"><span class="pat-preview checker"></span>Checker</button>
+                    <button class="pattern-btn" data-pattern="flames"><span class="pat-preview flames"></span>Flames</button>
+                    <button class="pattern-btn" data-pattern="brushed"><span class="pat-preview brushed"></span>Brushed</button>
+                    <button class="pattern-btn" data-pattern="hex"><span class="pat-preview hex"></span>Hex</button>
+                    <button class="pattern-btn" data-pattern="dots"><span class="pat-preview dots"></span>Dots</button>
+                    <button class="pattern-btn" data-pattern="pinstripe"><span class="pat-preview pinstripe"></span>Pinstripe</button>
+                    <button class="pattern-btn" data-pattern="marble"><span class="pat-preview marble"></span>Marble</button>
+                    <button class="pattern-btn" data-pattern="tiger"><span class="pat-preview tiger"></span>Tiger</button>
+                    <button class="pattern-btn" data-pattern="racing"><span class="pat-preview racing"></span>Racing</button>
+                    <button class="pattern-btn" data-pattern="holo"><span class="pat-preview holo"></span>Holo</button>
+                </div>
+            </div>
+
+            <!-- Stickers & Decals -->
+            <div class="panel-section">
+                <h3><i class="fas fa-star"></i> Stickers & Decals</h3>
+                <div class="sticker-color-row">
+                    <label>Sticker-farge: <input type="color" id="sticker-color" value="#ffcc00"></label>
+                </div>
+                <div class="sticker-grid">
+                    <button class="sticker-btn" data-sticker="lightning" title="Lyn">⚡</button>
+                    <button class="sticker-btn" data-sticker="star"      title="Stjerne">★</button>
+                    <button class="sticker-btn" data-sticker="flame"     title="Flamme">🔥</button>
+                    <button class="sticker-btn" data-sticker="arrow"     title="Pil">➜</button>
+                    <button class="sticker-btn" data-sticker="diamond"   title="Diamant">◆</button>
+                    <button class="sticker-btn" data-sticker="skull"     title="Hodeskalle">💀</button>
+                    <button class="sticker-btn" data-sticker="stripe-h"  title="Stripe">━━</button>
+                    <button class="sticker-btn" data-sticker="stripe-d"  title="Diagonal">//</button>
+                    <button class="sticker-btn" data-sticker="tribal"    title="Tribal">〜</button>
+                    <button class="sticker-btn" data-sticker="circle"    title="Sirkel">●</button>
+                    <button class="sticker-btn" data-sticker="cross"     title="Kryss">✚</button>
+                    <button class="sticker-btn" data-sticker="wave"      title="Bølge">〰</button>
+                    <button class="sticker-btn" data-sticker="crown"     title="Krone">♛</button>
+                    <button class="sticker-btn" data-sticker="heart"     title="Hjerte">♥</button>
+                    <button class="sticker-btn" data-sticker="music"     title="Musikk">♪</button>
+                    <button class="sticker-btn" data-sticker="shield"    title="Skjold">🛡</button>
+                    <button class="sticker-btn" data-sticker="flag"      title="Sjakk-flagg">🏁</button>
+                    <button class="sticker-btn" data-sticker="paw"       title="Pote">🐾</button>
+                    <button class="sticker-btn" data-sticker="infinity"  title="Uendelig">∞</button>
+                    <button class="sticker-btn" data-sticker="dragon"    title="Drage">🐉</button>
+                </div>
+            </div>
+
+            <!-- Text / Logo -->
+            <div class="panel-section">
+                <h3><i class="fas fa-font"></i> Tekst / Logo</h3>
+                <input type="text" id="text-input" placeholder="Skriv tekst her..." class="text-inp">
+                <div class="text-controls">
+                    <input type="number" id="text-size" value="52" min="12" max="300" title="Størrelse">
+                    <input type="color" id="text-color" value="#ffffff" title="Tekstfarge">
+                    <select id="text-font">
+                        <option value="Impact">Impact</option>
+                        <option value="Arial Black">Arial Black</option>
+                        <option value="Arial">Arial</option>
+                        <option value="Georgia">Georgia</option>
+                        <option value="Courier New">Courier New</option>
+                        <option value="Verdana">Verdana</option>
+                        <option value="Tahoma">Tahoma</option>
+                    </select>
+                </div>
+                <div class="checkbox-row">
+                    <label><input type="checkbox" id="text-bold" checked> Bold</label>
+                    <label><input type="checkbox" id="text-outline"> Outline</label>
+                    <label><input type="checkbox" id="text-italic"> Kursiv</label>
+                </div>
+                <button class="btn btn-secondary btn-sm btn-full" id="btn-add-text">
+                    <i class="fas fa-plus"></i> Legg til tekst
+                </button>
+            </div>
+
+            <!-- AI Wrap Generator -->
+            <div class="panel-section">
+                <h3><i class="fas fa-wand-magic-sparkles"></i> AI Wrap Generator <span class="badge-ai">AI</span></h3>
+                <div class="ai-presets">
+                    <button class="ai-tag" data-p="aggressive racing sport car wrap design with flames and speed lines, red black">Sport</button>
+                    <button class="ai-tag" data-p="professional corporate business minimal geometric car wrap, navy blue silver">Business</button>
+                    <button class="ai-tag" data-p="colorful abstract psychedelic kaleidoscope geometric pattern, neon vibrant colors">Abstract</button>
+                    <button class="ai-tag" data-p="urban street art graffiti wild style bold lettering car wrap, multicolor">Urban</button>
+                    <button class="ai-tag" data-p="dark military tactical camouflage pattern car wrap, olive green black">Militær</button>
+                    <button class="ai-tag" data-p="luxury art deco ornamental gold chrome metallic elegant pattern, black gold">Luxury</button>
+                    <button class="ai-tag" data-p="ice winter frost snowflake crystal car wrap pattern, light blue white silver">Ice</button>
+                    <button class="ai-tag" data-p="cyberpunk neon futuristic circuit board pattern car wrap, electric blue pink on black">Cyber</button>
+                </div>
+                <textarea id="ai-prompt" placeholder="Beskriv ønsket wrap... f.eks. 'aggressivt racing-design med blå flammer og gull detaljer'" rows="3"></textarea>
+                <button class="btn btn-ai btn-full" id="btn-ai-generate">
+                    <i class="fas fa-wand-magic-sparkles"></i> Generer AI Wrap
+                </button>
+                <div class="ai-status hidden" id="ai-status">
+                    <div class="spinner"></div>
+                    <span id="ai-status-text">Genererer design...</span>
+                </div>
+                <div class="ai-result hidden" id="ai-result">
+                    <img id="ai-img" alt="AI-generert wrap">
+                    <div class="ai-result-btns">
+                        <button class="btn btn-primary btn-sm flex1" id="btn-ai-apply"><i class="fas fa-check"></i> Bruk som wrap</button>
+                        <button class="btn btn-ghost btn-sm" id="btn-ai-retry" title="Generer på nytt"><i class="fas fa-redo"></i></button>
+                        <button class="btn btn-ghost btn-sm" id="btn-ai-discard" title="Forkast"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload -->
+            <div class="panel-section">
+                <h3><i class="fas fa-upload"></i> Last opp bilde</h3>
+                <div class="drop-zone" id="drop-zone">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>Dra & slipp</p>
+                    <button class="btn btn-secondary btn-sm" id="btn-upload">Velg fil</button>
+                    <input type="file" id="file-input" accept="image/*" hidden>
+                </div>
+                <div class="radio-row">
+                    <label><input type="radio" name="upload-mode" value="sticker" checked> Sticker/Logo</label>
+                    <label><input type="radio" name="upload-mode" value="wrap"> Full wrap</label>
+                </div>
+            </div>
+
+            <!-- Decal list -->
+            <div class="panel-section">
+                <h3><i class="fas fa-layer-group"></i> Plasserte elementer</h3>
+                <div id="decals-list" class="decals-list">
+                    <p class="empty-hint">Ingen elementer ennå</p>
+                </div>
+            </div>
+
+        </aside>
+
+        <!-- ===== VIEWPORT ===== -->
+        <main class="viewport">
+            <!-- 2D -->
+            <div id="viewer-2d" class="viewer active">
+                <canvas id="main-canvas"></canvas>
+                <div class="canvas-hint" id="canvas-hint">
+                    <i class="fas fa-mouse-pointer"></i> Klikk på et sticker/tekst-element for å flytte og endre størrelse
+                </div>
+            </div>
+            <!-- 3D -->
+            <div id="viewer-3d" class="viewer">
+                <canvas id="canvas-3d"></canvas>
+                <div class="cam-controls">
+                    <button class="cam-btn" data-view="front">Front</button>
+                    <button class="cam-btn" data-view="left">Venstre</button>
+                    <button class="cam-btn" data-view="right">Høyre</button>
+                    <button class="cam-btn" data-view="back">Bak</button>
+                    <button class="cam-btn" data-view="top">Topp</button>
+                </div>
+            </div>
+            <!-- Loading -->
+            <div id="loading-overlay" class="loading-overlay">
+                <div class="spinner large"></div>
+                <p>Laster WrapStudio Pro...</p>
+            </div>
+        </main>
+    </div>
+</div>
+
+<!-- Context menu -->
+<div id="ctx-menu" class="ctx-menu hidden">
+    <button id="ctx-delete"><i class="fas fa-trash"></i> Slett</button>
+    <button id="ctx-duplicate"><i class="fas fa-copy"></i> Dupliser</button>
+    <button id="ctx-front"><i class="fas fa-level-up-alt"></i> Forrest</button>
+    <button id="ctx-back-z"><i class="fas fa-level-down-alt"></i> Bakerst</button>
+</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(file img/*.png)",
+      "Bash(python3 -c ' *)",
+      "Bash(identify img/*.png)",
+      "Bash(node *)",
+      "Bash(dir \"C:\\\\Users\\\\stanf\\\\Desktop\\\\build_wrap\" /b)",
+      "Bash(dir C:\\\\Users\\\\stanf\\\\Desktop\\\\build_wrap\\\\img *)",
+      "Bash(dir C:\\\\Users\\\\stanf\\\\Desktop\\\\build_wrap\\\\3d *)"
+    ]
+  }
+}
