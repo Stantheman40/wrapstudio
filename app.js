@@ -1,6 +1,7 @@
 // WrapStudio Pro — app.js
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
 
 // ═══════════════════════════════════════════════════════
 //  STATE
@@ -1316,18 +1317,30 @@ function aiProceduralWrap(prompt) {
 
 function setupUI() {
   // ── car thumbnails ───────────────────────────────────
-  const thumbBox=document.getElementById('car-thumbs');
-  CAR_IMAGES.forEach((src,i)=>{
-    const img=document.createElement('img');
-    img.src=src; img.className=`car-thumb${i===0?' active':''}`; img.title=`Visning ${i+1}`;
-    img.onclick=()=>{
-      state.carIndex=i;
-      document.querySelectorAll('.car-thumb').forEach(t=>t.classList.remove('active'));
-      img.classList.add('active');
-      render2D();
+  updateCarThumbs();
+
+  // ── 2D view image upload ─────────────────────────────
+  document.getElementById('btn-upload-2d').onclick = () =>
+    document.getElementById('input-2d-img').click();
+
+  document.getElementById('input-2d-img').onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const idx = state.carIndex;
+        state.carImgs[idx] = img;
+        buildMasks(img, idx);
+        updateCarThumbs();
+        render2D();
+        notify(`2D-bilde oppdatert for visning ${idx + 1}`);
+      };
+      img.src = ev.target.result;
     };
-    thumbBox.appendChild(img);
-  });
+    reader.readAsDataURL(f);
+    e.target.value = '';
+  };
 
   // ── quick colours ────────────────────────────────────
   document.querySelectorAll('.qc').forEach(el=>{
@@ -1554,8 +1567,128 @@ function setupUI() {
     render2D(); notify('AI wrap lagt på!');
   };
 
+  // ── 3D Model: upload & Sketchfab ────────────────────
+  document.getElementById('btn-upload-glb').onclick = () =>
+    document.getElementById('glb-input').click();
+
+  document.getElementById('glb-input').onchange = e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    notify(`Laster inn ${f.name}…`);
+    scene3d?.loadGLBFromFile(f);
+    e.target.value = '';
+  };
+
+  document.getElementById('btn-reset-model').onclick = () => {
+    scene3d?.resetToDefault();
+    notify('Tilbake til standard bil');
+  };
+
+  // Restore saved token
+  const savedTok = localStorage.getItem('sfToken');
+  if (savedTok) document.getElementById('sf-token').value = savedTok;
+
+  async function doSfSearch() {
+    const q = document.getElementById('sf-query').value.trim();
+    if (!q) return;
+    const statusEl  = document.getElementById('sf-status');
+    const resultsEl = document.getElementById('sf-results');
+    statusEl.textContent = 'Søker Sketchfab…';
+    statusEl.classList.remove('hidden');
+    resultsEl.classList.add('hidden');
+    resultsEl.innerHTML = '';
+    try {
+      const models = await sfSearch(q);
+      statusEl.classList.add('hidden');
+      if (!models.length) { statusEl.textContent = 'Ingen resultater'; statusEl.classList.remove('hidden'); return; }
+      document.getElementById('sf-token-row').classList.remove('hidden');
+      document.getElementById('sf-browse-link').classList.remove('hidden');
+      models.forEach(m => {
+        const thumb = m.thumbnails?.images?.find(i => i.width >= 100)?.url
+                   || m.thumbnails?.images?.[0]?.url || '';
+        const card = document.createElement('div');
+        card.className = 'sf-card';
+        card.innerHTML = `<img src="${thumb}" alt=""><span title="${m.name}">${m.name}</span>`;
+        card.onclick = () => doSfLoad(m);
+        resultsEl.appendChild(card);
+      });
+      resultsEl.classList.remove('hidden');
+    } catch(err) {
+      statusEl.textContent = `Feil: ${err.message}`;
+    }
+  }
+
+  async function doSfLoad(model) {
+    const token = document.getElementById('sf-token').value.trim();
+    if (!token) {
+      notify('Lim inn Sketchfab API-token for å laste ned');
+      document.getElementById('sf-token').focus();
+      return;
+    }
+    localStorage.setItem('sfToken', token);
+    notify(`Laster ned "${model.name}"…`);
+    try {
+      const glbUrl = await sfDownloadUrl(model.uid, token);
+      const resp   = await fetch(glbUrl);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob   = await resp.blob();
+      scene3d?.loadGLBFromFile(new File([blob], model.name + '.glb', { type:'model/gltf-binary' }));
+      notify(`"${model.name}" lagt inn!`);
+    } catch(err) {
+      notify(`Feil: ${err.message}`);
+      console.error('Sketchfab last ned feil:', err);
+    }
+  }
+
+  document.getElementById('btn-sf-search').onclick = doSfSearch;
+  document.getElementById('sf-query').onkeydown = e => { if (e.key === 'Enter') doSfSearch(); };
+
   // hint auto-hide
   setTimeout(()=>document.getElementById('canvas-hint')?.classList.add('hidden'),7000);
+}
+
+// ─────────────────────────────────────────────────────
+//  HELPERS
+// ─────────────────────────────────────────────────────
+// Convert a rendered white-on-black canvas into an alpha-mask canvas
+// (used by the 2D renderer's destination-in compositing)
+function renderToAlphaMask(srcCanvas) {
+  const out = document.createElement('canvas');
+  out.width = srcCanvas.width; out.height = srcCanvas.height;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(srcCanvas, 0, 0);
+  const d = ctx.getImageData(0, 0, out.width, out.height);
+  for (let i = 0; i < d.data.length; i += 4) {
+    const br = (d.data[i] + d.data[i+1] + d.data[i+2]) / 3;
+    d.data[i] = d.data[i+1] = d.data[i+2] = 255;
+    d.data[i+3] = br;
+  }
+  ctx.putImageData(d, 0, 0);
+  return out;
+}
+
+// Refresh the car-thumb strip from whatever is currently in state.carImgs
+function updateCarThumbs() {
+  const box = document.getElementById('car-thumbs');
+  if (!box) return;
+  box.innerHTML = '';
+  for (let i = 0; i < 4; i++) {
+    const img  = state.carImgs[i];
+    const el   = document.createElement(img ? 'img' : 'div');
+    el.className = `car-thumb${i === state.carIndex ? ' active' : ''}`;
+    el.title     = `Visning ${i + 1}`;
+    if (img) {
+      el.src = img.src || img.currentSrc || '';
+      if (!el.src && img instanceof HTMLCanvasElement) el.src = img.toDataURL();
+    }
+    el.onclick = () => {
+      state.carIndex = i;
+      document.querySelectorAll('.car-thumb').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+      render2D();
+    };
+    box.appendChild(el);
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1569,31 +1702,328 @@ class Scene3D {
     this.scene.background = new THREE.Color(0x0d0d18);
 
     this.camera = new THREE.PerspectiveCamera(42, 16/9, 0.1, 500);
-    // Start in front of the front panel
     this.camera.position.set(0, 3.5, -14);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias:true, preserveDrawingBuffer:true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping       = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.1;
     this.renderer.setSize(900, 600, false);
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.06;
-    this.controls.minDistance   = 3;
+    this.controls.minDistance   = 2;
     this.controls.maxDistance   = 40;
     this.controls.maxPolarAngle = Math.PI * 0.75;
-    this.controls.target.set(0, 2, 0);
+    this.controls.target.set(0, 1.5, 0);
     this.controls.update();
 
-    // One compositing canvas + Three.js plane per car view
+    // ── GLB model state ──────────────────────────────
+    this._mode       = 'png';   // 'png' | 'glb'
+    this._glbGroup   = null;
+    this._bodyMeshes = [];      // meshes that receive the wrap texture
+    this._origMats   = [];      // original materials (restored on clear)
+    this._wrapTexC   = null;
+    this._wrapTexCtx = null;
+    this._wrapTex    = null;
+
+    // ── PNG plane state (shown while GLB loads / as fallback) ──
     this._viewCanvases = [];
     this._viewCtxs     = [];
     this._planeMats    = [];
     this._planes       = [];
-    this._tmp          = null;   // shared scratch canvas
+    this._tmp          = null;
     this._tmpCtx       = null;
 
-    this._buildViews();
+    this._loader = new GLTFLoader();
+
+    this._setupLights();
+    this._setupFloor();
+    this._buildViews();   // PNG planes visible while GLB loads
+
+    // Auto-load the bundled default model
+    this.loadGLB('3d/2021_pandem_gr86_v1_aero_kit.glb', 'GR86 Pandem');
+  }
+
+  // ─────────────────────────────────────────────────────
+  //  GLB LOADING
+  // ─────────────────────────────────────────────────────
+  loadGLB(url, name, onDone, onFail) {
+    document.getElementById('model-loading')?.classList.remove('hidden');
+    this._loader.load(url, gltf => {
+      this._activateGLB(gltf.scene);
+      document.getElementById('model-loading')?.classList.add('hidden');
+      const nameEl = document.getElementById('model-name');
+      if (nameEl) nameEl.textContent = name;
+      this.syncWrap(state.wrap, state.decals, canvas.width, canvas.height);
+      if (onDone) onDone();
+    }, undefined, err => {
+      console.warn('GLB load failed, using PNG fallback:', err);
+      document.getElementById('model-loading')?.classList.add('hidden');
+      if (onFail) onFail(err);
+    });
+  }
+
+  loadGLBFromFile(file) {
+    const url  = URL.createObjectURL(file);
+    const name = file.name.replace(/\.[^.]+$/, '');
+    this.loadGLB(url, name, () => URL.revokeObjectURL(url));
+  }
+
+  resetToDefault() {
+    this.loadGLB('3d/2021_pandem_gr86_v1_aero_kit.glb', 'GR86 Pandem');
+  }
+
+  // ─────────────────────────────────────────────────────
+  //  ACTIVATE LOADED GLB
+  // ─────────────────────────────────────────────────────
+  _activateGLB(group) {
+    if (this._glbGroup) this.scene.remove(this._glbGroup);
+    this._planes.forEach(p => { p.visible = false; });   // hide PNG panels
+
+    // Auto-center + scale to ~8 world units at longest axis
+    const box    = new THREE.Box3().setFromObject(group);
+    const center = box.getCenter(new THREE.Vector3());
+    const size   = box.getSize(new THREE.Vector3());
+    const scale  = 8 / Math.max(size.x, size.y, size.z);
+    group.scale.setScalar(scale);
+    group.position.set(-center.x * scale,
+                       -center.y * scale + (size.y * scale) / 2,
+                       -center.z * scale);
+
+    // Identify body-panel meshes (skip glass, lights, tires, chrome…)
+    const skipRx = /glass|window|wind|screen|lens|light|lamp|indicator|bulb|rubber|tire|tyre|rim|mirror|chrome|exhaust|interior|seat|carpet/i;
+    this._bodyMeshes = [];
+    this._origMats   = [];
+
+    group.traverse(child => {
+      if (!child.isMesh) return;
+      const mat = Array.isArray(child.material) ? child.material[0] : child.material;
+      if (!mat) return;
+      if (skipRx.test(mat.name + ' ' + child.name)) return;
+      if (mat.transparent && mat.opacity < 0.7) return;
+      this._bodyMeshes.push(child);
+      this._origMats.push(child.material);
+    });
+
+    // Fallback: no names matched → use all opaque meshes
+    if (!this._bodyMeshes.length) {
+      group.traverse(child => {
+        if (!child.isMesh) return;
+        const mat = Array.isArray(child.material) ? child.material[0] : child.material;
+        if (!mat || (mat.transparent && mat.opacity < 0.5)) return;
+        this._bodyMeshes.push(child);
+        this._origMats.push(child.material);
+      });
+    }
+
+    this.scene.add(group);
+    this._glbGroup = group;
+    this._mode     = 'glb';
+
+    this.camera.position.set(0, 4, -13);
+    this.controls.target.set(0, 1.5, 0);
+    this.controls.update();
+
+    // Capture 4 orthographic views → update the 2D canvas too
+    setTimeout(() => this._captureViews(), 120);
+  }
+
+  // ─────────────────────────────────────────────────────
+  //  WRAP SYNC — dispatches to GLB or PNG path
+  // ─────────────────────────────────────────────────────
+  syncWrap(wrapState, decals, canW, canH) {
+    if (this._mode === 'glb') {
+      this._syncWrapGLB(wrapState);
+    } else {
+      this._syncWrapPNG(wrapState, decals, canW, canH);
+    }
+  }
+
+  // Apply wrap as a UV-mapped canvas texture on all body meshes
+  _syncWrapGLB(wrapState) {
+    if (!this._bodyMeshes.length) return;
+
+    if (!wrapState.active) {
+      this._bodyMeshes.forEach((m, i) => { m.material = this._origMats[i]; });
+      return;
+    }
+
+    if (!this._wrapTexC) {
+      this._wrapTexC   = Object.assign(document.createElement('canvas'), { width:2048, height:2048 });
+      this._wrapTexCtx = this._wrapTexC.getContext('2d');
+      this._wrapTex    = new THREE.CanvasTexture(this._wrapTexC);
+      this._wrapTex.colorSpace = THREE.SRGBColorSpace;
+      this._wrapTex.wrapS = this._wrapTex.wrapT = THREE.RepeatWrapping;
+    }
+
+    const c = this._wrapTexCtx, W = 2048, H = 2048;
+    c.clearRect(0, 0, W, H);
+    c.save();
+    c.globalAlpha = wrapState.opacity;
+    drawWrapToCtx(c, { x:0, y:0, w:W, h:H });
+    c.restore();
+    this._wrapTex.needsUpdate = true;
+
+    this._bodyMeshes.forEach(mesh => {
+      if (!mesh._wrapMat) {
+        mesh._wrapMat = new THREE.MeshPhysicalMaterial({
+          map: this._wrapTex,
+          roughness: 0.28, metalness: 0.06,
+          clearcoat: 0.9,  clearcoatRoughness: 0.08,
+        });
+      }
+      mesh.material = mesh._wrapMat;
+    });
+  }
+
+  // ─────────────────────────────────────────────────────
+  //  LIGHTS  (used in GLB mode; PNG planes use MeshBasicMaterial)
+  // ─────────────────────────────────────────────────────
+  _setupLights() {
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+    const key = new THREE.DirectionalLight(0xfffaf0, 2.0);
+    key.position.set(6, 12, -8);
+    key.castShadow = true;
+    key.shadow.mapSize.setScalar(2048);
+    key.shadow.bias = -0.0003;
+    Object.assign(key.shadow.camera, { left:-10, right:10, top:10, bottom:-10, near:0.5, far:60 });
+    this.scene.add(key);
+
+    const fill = new THREE.DirectionalLight(0x8899ff, 0.5);
+    fill.position.set(-6, 4, 6);
+    this.scene.add(fill);
+
+    const rim = new THREE.DirectionalLight(0xffcc88, 0.4);
+    rim.position.set(0, 3, 12);
+    this.scene.add(rim);
+  }
+
+  // ─────────────────────────────────────────────────────
+  //  FLOOR
+  // ─────────────────────────────────────────────────────
+  _setupFloor() {
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(200, 200),
+      new THREE.MeshStandardMaterial({ color:0x0d0d1a, roughness:0.92, metalness:0.08 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    this.scene.add(floor);
+    const grid = new THREE.GridHelper(80, 80, 0x1a1a2e, 0x1a1a2e);
+    grid.position.y = 0.005;
+    this.scene.add(grid);
+  }
+
+  // ─────────────────────────────────────────────────────
+  //  CAPTURE 4 VIEWS → sync 2D canvas
+  // ─────────────────────────────────────────────────────
+  _captureViews() {
+    if (!this._glbGroup) return;
+
+    const W = 1200, H = 520;
+    const off = Object.assign(document.createElement('canvas'), { width: W, height: H });
+    const tmpR = new THREE.WebGLRenderer({ canvas: off, antialias: true, preserveDrawingBuffer: true });
+    tmpR.setSize(W, H);
+    tmpR.toneMapping       = THREE.ACESFilmicToneMapping;
+    tmpR.toneMappingExposure = 1.1;
+    tmpR.shadowMap.enabled = false;
+
+    const cam = new THREE.PerspectiveCamera(38, W / H, 0.1, 300);
+    const tgt = new THREE.Vector3(0, 1.5, 0);
+
+    // Camera distance based on model size
+    const box  = new THREE.Box3().setFromObject(this._glbGroup);
+    const sz   = box.getSize(new THREE.Vector3());
+    const dist = Math.max(sz.x, sz.y, sz.z) * 1.6 + 5;
+    const eyeY = sz.y * 0.45;
+
+    const poses = [
+      new THREE.Vector3(  0,  eyeY, -dist),  // front
+      new THREE.Vector3(dist, eyeY,   0  ),  // right
+      new THREE.Vector3(  0,  eyeY,  dist),  // back
+      new THREE.Vector3(-dist,eyeY,   0  ),  // left
+    ];
+
+    // Non-model scene children to hide during mask renders (keep lights)
+    const extras = this.scene.children.filter(
+      c => c !== this._glbGroup &&
+           !(c instanceof THREE.Light)
+    );
+
+    const whiteMat  = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const newImgs   = [];
+    const newWMasks = [];
+    const newCMasks = [];
+
+    poses.forEach((pos, vi) => {
+      cam.position.copy(pos);
+      cam.lookAt(tgt);
+      cam.updateProjectionMatrix();
+
+      // ① Normal render (scene bg #0d0d18)
+      extras.forEach(c => { c.visible = true; });
+      tmpR.setClearColor(0x0d0d18, 1);
+      tmpR.render(this.scene, cam);
+
+      const imgC = document.createElement('canvas');
+      imgC.width = W; imgC.height = H;
+      imgC.getContext('2d').drawImage(off, 0, 0);
+      const img = new Image();
+      img.src = imgC.toDataURL('image/png');
+      newImgs[vi] = img;
+
+      // Hide extras for mask renders
+      extras.forEach(c => { c.visible = false; });
+      tmpR.setClearColor(0x000000, 1);
+
+      // ② White body mask (body meshes = white, rest hidden)
+      const allMeshData = [];
+      this._glbGroup.traverse(c => {
+        if (!c.isMesh) return;
+        allMeshData.push({ c, vis: c.visible, mat: c.material });
+        c.visible = false;
+      });
+      const savedBodyMats = this._bodyMeshes.map(m => m.material);
+      this._bodyMeshes.forEach(m => { m.visible = true; m.material = whiteMat; });
+
+      tmpR.render(this.scene, cam);
+      const wmC = document.createElement('canvas');
+      wmC.width = W; wmC.height = H;
+      wmC.getContext('2d').drawImage(off, 0, 0);
+      newWMasks[vi] = renderToAlphaMask(wmC);
+
+      // ③ Car silhouette (all meshes white)
+      allMeshData.forEach(({ c }) => { c.visible = true; c.material = whiteMat; });
+      tmpR.render(this.scene, cam);
+      const cmC = document.createElement('canvas');
+      cmC.width = W; cmC.height = H;
+      cmC.getContext('2d').drawImage(off, 0, 0);
+      newCMasks[vi] = renderToAlphaMask(cmC);
+
+      // Restore
+      this._bodyMeshes.forEach((m, j) => { m.material = savedBodyMats[j]; });
+      allMeshData.forEach(({ c, vis, mat }) => { c.visible = vis; c.material = mat; });
+      extras.forEach(c => { c.visible = true; });
+    });
+
+    tmpR.dispose();
+
+    // Push into state and refresh 2D
+    for (let i = 0; i < 4; i++) {
+      state.carImgs[i]   = newImgs[i];
+      state.whiteMask[i] = newWMasks[i];
+      state.carMask[i]   = newCMasks[i];
+    }
+    state.carIndex = 0;
+    updateCarThumbs();
+    resizeCanvas();
+    render2D();
+    notify('2D-visning oppdatert fra 3D-modell');
   }
 
   // ── Build 4 PNG-based view planes ────────────────────
@@ -1659,22 +2089,10 @@ class Scene3D {
       this._planes.push(mesh);
     });
 
-    // Dark floor + subtle grid for studio feel
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(200, 200),
-      new THREE.MeshBasicMaterial({ color: 0x0d0d18 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    this.scene.add(floor);
-
-    const grid = new THREE.GridHelper(80, 80, 0x1a1a2e, 0x1a1a2e);
-    grid.position.y = 0.005;
-    this.scene.add(grid);
   }
 
   // ── Composite wrap + decals onto every PNG plane ─────
-  // Called from render2D() on every 2D state change.
-  syncWrap(wrapState, decals, canW, canH) {
+  _syncWrapPNG(wrapState, decals, canW, canH) {
     const imgs = state.carImgs;
     const img0 = imgs.find(Boolean);
     if (!img0 || !this._viewCanvases.length) return;
@@ -1794,6 +2212,31 @@ class Scene3D {
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }
+}
+
+// ═══════════════════════════════════════════════════════
+//  SKETCHFAB API  (search = no-auth; download = API token)
+// ═══════════════════════════════════════════════════════
+async function sfSearch(query) {
+  const url = `https://api.sketchfab.com/v3/search?type=models&downloadable=true&count=8&q=${encodeURIComponent(query)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Sketchfab ${res.status}`);
+  const data = await res.json();
+  return data.results || [];
+}
+
+async function sfDownloadUrl(uid, token) {
+  const res = await fetch(`https://api.sketchfab.com/v3/models/${uid}/download`, {
+    headers: { 'Authorization': `Token ${token}` },
+  });
+  if (!res.ok) {
+    const msg = await res.json().catch(() => ({}));
+    throw new Error(msg.detail || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  const u = data.glb?.url || data.source?.url;
+  if (!u) throw new Error('Ingen GLB tilgjengelig for denne modellen');
+  return u;
 }
 
 // ═══════════════════════════════════════════════════════

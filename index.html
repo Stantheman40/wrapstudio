@@ -34,6 +34,48 @@
             <div class="panel-section">
                 <h3><i class="fas fa-car"></i> Velg side</h3>
                 <div class="car-thumbs" id="car-thumbs"></div>
+                <div class="btn-row" style="margin-top:6px">
+                    <button class="btn btn-ghost btn-sm flex1" id="btn-upload-2d">
+                        <i class="fas fa-image"></i> Bytt 2D-bilde
+                    </button>
+                    <input type="file" id="input-2d-img" accept="image/*" hidden>
+                </div>
+            </div>
+
+            <!-- 3D Model -->
+            <div class="panel-section" id="section-3d-model">
+                <h3><i class="fas fa-cube"></i> 3D Modell</h3>
+                <div class="model-info">
+                    <i class="fas fa-car-side model-icon"></i>
+                    <span id="model-name">GR86 Pandem</span>
+                    <div class="spinner small hidden" id="model-loading"></div>
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-secondary btn-sm flex1" id="btn-upload-glb">
+                        <i class="fas fa-upload"></i> Last opp GLB
+                    </button>
+                    <input type="file" id="glb-input" accept=".glb,.gltf" hidden>
+                    <button class="btn btn-ghost btn-sm" id="btn-reset-model" title="Tilbake til GR86">
+                        <i class="fas fa-undo"></i>
+                    </button>
+                </div>
+                <div class="sketchfab-search">
+                    <div class="sf-search-row">
+                        <input type="text" id="sf-query" placeholder="Søk Sketchfab…">
+                        <button class="btn btn-secondary btn-sm" id="btn-sf-search">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                    <a id="sf-browse-link" class="sf-browse-link hidden" href="https://sketchfab.com/3d-models/categories/cars-vehicles" target="_blank" rel="noopener">
+                        <i class="fas fa-external-link-alt"></i> Bla gjennom alle biler på Sketchfab ↗
+                    </a>
+                    <div id="sf-token-row" class="sf-token-row hidden">
+                        <input type="password" id="sf-token" placeholder="API-token for nedlasting">
+                        <a class="sf-token-link" href="https://sketchfab.com/settings/password" target="_blank" rel="noopener">Hent token ↗</a>
+                    </div>
+                    <div id="sf-status" class="sf-status hidden"></div>
+                    <div id="sf-results" class="sf-results hidden"></div>
+                </div>
             </div>
 
             <!-- Wrap color -->
