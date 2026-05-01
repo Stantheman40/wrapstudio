@@ -13,6 +13,7 @@ const state = {
   carImgs  : Array(4).fill(null),   // loaded Image elements
   whiteMask: Array(4).fill(null),   // canvas – white body pixels only
   carMask  : Array(4).fill(null),   // canvas – full car silhouette
+  panelMask: Array(4).fill(null),   // canvas – body panels only (excludes tires/glass)
   wrap     : { active:false, color:'#cc0000', opacity:0.82, pattern:null, uploadedImg:null,
                gradColor2:'#0044cc', gradDir:'h' },
   decals   : [],
@@ -52,6 +53,7 @@ function buildMasks(img, idx) {
 
   const wData = new Uint8ClampedArray(W * H * 4);
   const cData = new Uint8ClampedArray(W * H * 4);
+  const pData = new Uint8ClampedArray(W * H * 4);
 
   for (let i = 0; i < src.length; i += 4) {
     const r = src[i], g = src[i+1], b = src[i+2], a = src[i+3];
@@ -60,12 +62,17 @@ function buildMasks(img, idx) {
     // Car silhouette — any visible pixel
     cData[i+3] = a;
 
-    // White-body mask — bright + low saturation
     const br  = (r + g + b) / 3;
     const sat = Math.max(r,g,b) - Math.min(r,g,b);
+
+    // White-body mask — bright + low saturation (for wrap)
     if (br > 168 && sat < 58) {
-      // Smooth alpha: full where very white, fades at edges/shadows
       wData[i+3] = Math.min(255, Math.round((br - 168) / 87 * 255 * (a / 255)));
+    }
+
+    // Panel mask — any painted/metal surface, excludes very dark tires (br <= 60)
+    if (br > 60) {
+      pData[i+3] = Math.min(255, Math.round((br - 60) / 195 * 255 * (a / 255)));
     }
   }
 
@@ -76,8 +83,9 @@ function buildMasks(img, idx) {
     return c;
   };
 
-  state.whiteMask[idx] = toCanvas(wData, W, H);
-  state.carMask[idx]   = toCanvas(cData, W, H);
+  state.whiteMask[idx]  = toCanvas(wData, W, H);
+  state.carMask[idx]    = toCanvas(cData, W, H);
+  state.panelMask[idx]  = toCanvas(pData, W, H);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -95,7 +103,8 @@ function resizeCanvas() {
 // ═══════════════════════════════════════════════════════
 function carRect() {
   const img = state.carImgs[state.carIndex];
-  if (!img) return { x:0, y:0, w:canvas.width, h:canvas.height, sx:1, sy:1 };
+  if (!img || !img.naturalWidth || !img.naturalHeight)
+    return { x:0, y:0, w:canvas.width, h:canvas.height, sx:1, sy:1 };
   const scale = Math.min(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
   const w = img.naturalWidth  * scale;
   const h = img.naturalHeight * scale;
@@ -143,16 +152,16 @@ function render2D() {
     ctx.drawImage(tmp, 0, 0);
   }
 
-  // ── decals  (clipped to full car silhouette) ─────────
-  const cm = state.carMask[state.carIndex];
+  // ── decals  (clipped to body panels — excludes tires/glass) ──
+  const pm = state.panelMask[state.carIndex];
   state.decals.forEach(d => {
     if (d.opacity === 0) return;
     tctx.clearRect(0, 0, W, H);
     drawDecalToCtx(tctx, d);
 
-    if (cm) {
+    if (pm) {
       tctx.globalCompositeOperation = 'destination-in';
-      tctx.drawImage(cm, r.x, r.y, r.w, r.h);
+      tctx.drawImage(pm, r.x, r.y, r.w, r.h);
       tctx.globalCompositeOperation = 'source-over';
     }
     ctx.globalAlpha = d.opacity ?? 1;
@@ -168,6 +177,9 @@ function render2D() {
 
   // ── keep 3D in sync with every 2D change ─────────────
   scene3d?.syncWrap(state.wrap, state.decals, canvas.width, canvas.height);
+
+  // ── floating decal toolbar ────────────────────────────
+  updateDecalToolbar();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -256,6 +268,30 @@ function drawWrapToCtx(c, r) {
 
   } else if (p === 'holo') {
     patHolo(c, x, y, w, h, col);
+
+  } else if (p === 'satin') {
+    patSatin(c, x, y, w, h, col);
+
+  } else if (p === 'metallic') {
+    patMetallic(c, x, y, w, h, col);
+
+  } else if (p === 'chrome') {
+    patChrome(c, x, y, w, h);
+
+  } else if (p === 'neon') {
+    patNeon(c, x, y, w, h, col);
+
+  } else if (p === 'ice') {
+    patIce(c, x, y, w, h);
+
+  } else if (p === 'ocean') {
+    patOcean(c, x, y, w, h);
+
+  } else if (p === 'urban') {
+    patUrban(c, x, y, w, h);
+
+  } else if (p === 'geo') {
+    patGeo(c, x, y, w, h, col);
 
   } else if (p === 'image' && state.wrap.uploadedImg) {
     c.drawImage(state.wrap.uploadedImg, x, y, w, h);
@@ -465,6 +501,148 @@ function patHolo(c, x, y, w, h, col) {
     sg.addColorStop(0,'transparent'); sg.addColorStop(0.5,'white'); sg.addColorStop(1,'transparent');
     c.fillStyle = sg; c.fillRect(sx-12, y, 24, h);
   }
+  c.restore();
+}
+
+function patSatin(c, x, y, w, h, col) {
+  c.fillStyle = col; c.fillRect(x, y, w, h);
+  const g = c.createLinearGradient(x, y, x, y + h * 0.6);
+  g.addColorStop(0, 'rgba(255,255,255,0.2)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.06)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = g; c.fillRect(x, y, w, h);
+  c.save(); c.globalAlpha = 0.05; c.strokeStyle = '#fff'; c.lineWidth = 0.5;
+  for (let i = 0; i < h; i += 3) { c.beginPath(); c.moveTo(x,y+i); c.lineTo(x+w,y+i); c.stroke(); }
+  c.restore();
+}
+
+function patMetallic(c, x, y, w, h, col) {
+  c.fillStyle = col; c.fillRect(x, y, w, h);
+  const g = c.createLinearGradient(x, y, x + w * 0.7, y + h);
+  g.addColorStop(0,   'rgba(255,255,255,0.55)');
+  g.addColorStop(0.35,'rgba(255,255,255,0.08)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.28)');
+  g.addColorStop(1,   'rgba(0,0,0,0.22)');
+  c.fillStyle = g; c.fillRect(x, y, w, h);
+  c.save(); c.globalAlpha = 0.14;
+  let seed = 42;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+  for (let i = 0; i < 100; i++) {
+    c.fillStyle = rnd() > 0.5 ? '#fff' : '#888';
+    c.fillRect(x + rnd() * w, y + rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2);
+  }
+  c.restore();
+}
+
+function patChrome(c, x, y, w, h) {
+  const g = c.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0,   '#e8e8e8');
+  g.addColorStop(0.2, '#c0c0c0');
+  g.addColorStop(0.38,'#f0f0f0');
+  g.addColorStop(0.52,'#a8a8a8');
+  g.addColorStop(0.68,'#e0e0e0');
+  g.addColorStop(0.84,'#b8b8b8');
+  g.addColorStop(1,   '#d8d8d8');
+  c.fillStyle = g; c.fillRect(x, y, w, h);
+  const r2 = c.createLinearGradient(x, y, x + w, y);
+  r2.addColorStop(0,    'rgba(160,0,255,0.07)');
+  r2.addColorStop(0.25, 'rgba(0,160,255,0.07)');
+  r2.addColorStop(0.5,  'rgba(0,255,100,0.05)');
+  r2.addColorStop(0.75, 'rgba(255,160,0,0.07)');
+  r2.addColorStop(1,    'rgba(255,0,100,0.07)');
+  c.fillStyle = r2; c.fillRect(x, y, w, h);
+}
+
+function patNeon(c, x, y, w, h, col) {
+  c.fillStyle = '#050508'; c.fillRect(x, y, w, h);
+  const step = Math.max(18, w / 26);
+  c.save(); c.strokeStyle = col; c.lineWidth = 0.7; c.globalAlpha = 0.25;
+  for (let gx = x; gx <= x + w; gx += step) { c.beginPath(); c.moveTo(gx,y); c.lineTo(gx,y+h); c.stroke(); }
+  for (let gy = y; gy <= y + h; gy += step) { c.beginPath(); c.moveTo(x,gy); c.lineTo(x+w,gy); c.stroke(); }
+  c.restore();
+  const colors = [col, lighten(col, 0.5), '#ffffff'];
+  c.save();
+  for (let i = 0; i < 5; i++) {
+    const lx = x + (i + 0.5) * (w / 5);
+    c.shadowColor = col; c.shadowBlur = 16;
+    c.strokeStyle = colors[i % colors.length]; c.lineWidth = 1.8; c.globalAlpha = 0.88;
+    c.beginPath(); c.moveTo(lx - h * 0.28, y); c.lineTo(lx + h * 0.28, y + h); c.stroke();
+  }
+  c.shadowBlur = 0; c.restore();
+}
+
+function patIce(c, x, y, w, h) {
+  const g = c.createLinearGradient(x, y, x + w, y + h);
+  g.addColorStop(0, '#c8eeff'); g.addColorStop(0.5, '#a0d4f0'); g.addColorStop(1, '#80b8e0');
+  c.fillStyle = g; c.fillRect(x, y, w, h);
+  c.fillStyle = 'rgba(255,255,255,0.65)';
+  for (let i = 0; i < 40; i++) {
+    c.beginPath(); c.arc(x + (i * 137) % w, y + (i * 59) % h, 1.5, 0, Math.PI * 2); c.fill();
+  }
+  const n = Math.max(4, Math.round(w / 100));
+  c.strokeStyle = 'rgba(160,220,255,0.6)'; c.lineWidth = 0.8;
+  for (let i = 0; i < n; i++) {
+    const cx2 = x + (i + 0.5) * (w / n), cy2 = y + h / 2, cr = Math.min(w / n, h) * 0.36;
+    for (let a = 0; a < 6; a++) {
+      const an = (a / 6) * Math.PI * 2;
+      c.beginPath(); c.moveTo(cx2, cy2);
+      c.lineTo(cx2 + Math.cos(an) * cr, cy2 + Math.sin(an) * cr); c.stroke();
+    }
+  }
+  const sg = c.createLinearGradient(x, y + h * 0.38, x, y + h * 0.62);
+  sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.5, 'rgba(255,255,255,0.22)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = sg; c.fillRect(x, y, w, h);
+}
+
+function patOcean(c, x, y, w, h) {
+  const g = c.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, '#001144'); g.addColorStop(0.5, '#003888'); g.addColorStop(1, '#006baa');
+  c.fillStyle = g; c.fillRect(x, y, w, h);
+  for (let wi = 0; wi < 10; wi++) {
+    const wy = y + h * (wi / 10), amp = h * 0.035;
+    c.strokeStyle = `rgba(80,180,255,${0.12 + wi * 0.04})`; c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(x, wy);
+    for (let px = 0; px <= w; px += 3) c.lineTo(x + px, wy + Math.sin((px / w) * Math.PI * 5 + wi) * amp);
+    c.stroke();
+  }
+  c.fillStyle = 'rgba(200,240,255,0.15)'; c.fillRect(x, y, w, h * 0.12);
+}
+
+function patUrban(c, x, y, w, h) {
+  c.fillStyle = '#111'; c.fillRect(x, y, w, h);
+  const uc = ['#ff2244', '#ff8800', '#ffdd00', '#00cc44', '#0088ff', '#cc00ff'];
+  for (let i = 0; i < 6; i++) {
+    c.save(); c.globalAlpha = 0.72;
+    c.fillStyle = uc[i % uc.length];
+    const bx = x + (i / 6) * w + (i % 2) * w * 0.08;
+    const bw2 = w * 0.3, bh2 = h * 0.64, by = y + h * (i % 2 ? 0.08 : 0.28), sk = h * 0.22;
+    c.beginPath();
+    c.moveTo(bx - sk, by); c.lineTo(bx + bw2 - sk, by);
+    c.lineTo(bx + bw2 + sk, by + bh2); c.lineTo(bx + sk, by + bh2);
+    c.closePath(); c.fill(); c.restore();
+  }
+  c.save(); c.globalAlpha = 0.13; c.strokeStyle = '#fff';
+  for (let i = 0; i < 18; i++) {
+    c.lineWidth = 1 + (i % 3);
+    const lx = x + (i / 18) * w;
+    c.beginPath(); c.moveTo(lx, y); c.lineTo(lx + h * 0.25, y + h); c.stroke();
+  }
+  c.restore();
+}
+
+function patGeo(c, x, y, w, h, col) {
+  c.fillStyle = darken(col, 0.42); c.fillRect(x, y, w, h);
+  patHex(c, x, y, w, h, col);
+  c.save(); c.globalAlpha = 0.22; c.strokeStyle = lighten(col, 0.4); c.lineWidth = 0.8;
+  const dw = Math.max(w / 14, 16);
+  for (let gx2 = x; gx2 < x + w + dw; gx2 += dw * 2)
+    for (let gy2 = y; gy2 < y + h + dw; gy2 += dw) {
+      const off = (Math.floor((gy2 - y) / dw) % 2) * dw;
+      c.beginPath();
+      c.moveTo(gx2 + off, gy2); c.lineTo(gx2 + off + dw, gy2 + dw * 0.5);
+      c.lineTo(gx2 + off, gy2 + dw); c.lineTo(gx2 + off - dw, gy2 + dw * 0.5);
+      c.closePath(); c.stroke();
+    }
   c.restore();
 }
 
@@ -785,6 +963,33 @@ function drawText(c, d, x, y) {
 }
 
 // ═══════════════════════════════════════════════════════
+//  FLOATING DECAL TOOLBAR
+// ═══════════════════════════════════════════════════════
+function updateDecalToolbar() {
+  const tb = document.getElementById('decal-toolbar');
+  if (!tb) return;
+  if (!state.selId) { tb.classList.add('hidden'); return; }
+  const d = state.decals.find(d => d.id === state.selId);
+  if (!d) { tb.classList.add('hidden'); return; }
+
+  const cr = canvas.getBoundingClientRect();
+  const vr = document.getElementById('viewer-2d').getBoundingClientRect();
+  const sx = cr.width  / canvas.width;
+  const sy = cr.height / canvas.height;
+
+  // Center of decal top edge, rotated
+  const rot = d.rotation || 0;
+  const cx  = d.x + d.w / 2;
+  const cy  = d.y + d.h / 2;
+  const ex  = cx + (-d.h / 2 - 18) * Math.sin(rot);
+  const ey  = cy + (-d.h / 2 - 18) * Math.cos(rot);
+
+  tb.style.left = `${cr.left - vr.left + ex * sx}px`;
+  tb.style.top  = `${cr.top  - vr.top  + ey * sy}px`;
+  tb.classList.remove('hidden');
+}
+
+// ═══════════════════════════════════════════════════════
 //  SELECTION HANDLES
 // ═══════════════════════════════════════════════════════
 function handles(d) {
@@ -968,15 +1173,17 @@ document.getElementById('ctx-back-z')   .onclick=()=>zOrder(state.selId,'back');
 // ═══════════════════════════════════════════════════════
 function addDecal(cfg) {
   // id MUST come last so a spread from dupDecal never overwrites the new id
+  const r = carRect();
+  const dw = cfg.w ?? 120, dh = cfg.h ?? 120;
   const d={
     rotation: cfg.rotation ?? 0,
     opacity:  cfg.opacity  ?? 1,
     type:     cfg.type,
     data:     cfg.data,
-    x: cfg.x ?? (canvas.width /2-(cfg.w??120)/2),
-    y: cfg.y ?? (canvas.height/2-(cfg.h??120)/2),
-    w: cfg.w ?? 120,
-    h: cfg.h ?? 120,
+    x: cfg.x ?? (r.x + r.w/2 - dw/2),
+    y: cfg.y ?? (r.y + r.h/2 - dh/2),
+    w: dw,
+    h: dh,
     id: state.nextId++,   // always last, never overwritten
   };
   state.decals.push(d);
@@ -1038,8 +1245,165 @@ function hx(hex) {
   if(hex.length===3) hex=hex.split('').map(c=>c+c).join('');
   return [parseInt(hex.slice(0,2),16),parseInt(hex.slice(2,4),16),parseInt(hex.slice(4,6),16)];
 }
-function darken(col,f){ try{const[r,g,b]=hx(col);return `rgb(${~~(r*(1-f))},${~~(g*(1-f))},${~~(b*(1-f))})`;}catch{return '#333';} }
+function darken(col,f){ try{const[r,g,b]=hx(col);return `rgb(${Math.max(0,~~(r*(1-f)))},${Math.max(0,~~(g*(1-f)))},${Math.max(0,~~(b*(1-f)))})`;}catch{return '#333';} }
 function lighten(col,f){ try{const[r,g,b]=hx(col);return `rgb(${Math.min(255,~~(r+255*f))},${Math.min(255,~~(g+255*f))},${Math.min(255,~~(b+255*f))})`;}catch{return '#aaa';} }
+
+// ═══════════════════════════════════════════════════════
+//  LIBRARY  — IndexedDB persistence for cars & GLB models
+// ═══════════════════════════════════════════════════════
+const LibDB = (() => {
+  let _db = null;
+  function open() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((res, rej) => {
+      const req = indexedDB.open('WrapStudioLibrary', 1);
+      req.onupgradeneeded = e => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains('items'))
+          d.createObjectStore('items', { keyPath: 'id', autoIncrement: true });
+      };
+      req.onsuccess = e => { _db = e.target.result; res(_db); };
+      req.onerror   = e => rej(e.target.error);
+    });
+  }
+  return {
+    save:   item => open().then(db => new Promise((res, rej) => {
+      const tx  = db.transaction('items', 'readwrite');
+      const req = tx.objectStore('items').add(item);
+      req.onsuccess = () => res(req.result);
+      req.onerror   = e => rej(e.target.error);
+    })),
+    getAll: () => open().then(db => new Promise((res, rej) => {
+      const tx  = db.transaction('items', 'readonly');
+      const req = tx.objectStore('items').getAll();
+      req.onsuccess = () => res(req.result);
+      req.onerror   = e => rej(e.target.error);
+    })),
+    delete: id => open().then(db => new Promise((res, rej) => {
+      const tx = db.transaction('items', 'readwrite');
+      tx.objectStore('items').delete(id);
+      tx.oncomplete = res;
+      tx.onerror    = e => rej(e.target.error);
+    })),
+  };
+})();
+
+function imgToDataURL(img) {
+  if (!img) return null;
+  if (img.src && img.src.startsWith('data:')) return img.src;
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth || 1; c.height = img.naturalHeight || 1;
+  c.getContext('2d').drawImage(img, 0, 0);
+  return c.toDataURL('image/png');
+}
+
+function makeThumbnail(img, w=120, h=68) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  if (img) {
+    const sc = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+    const dw = img.naturalWidth  * sc, dh = img.naturalHeight * sc;
+    c.getContext('2d').drawImage(img, (w-dw)/2, (h-dh)/2, dw, dh);
+  }
+  return c.toDataURL('image/jpeg', 0.75);
+}
+
+async function saveCarToLibrary() {
+  const name = prompt('Navn på bilen:', 'Min bil');
+  if (!name) return;
+  const imgs = [];
+  for (let i = 0; i < 4; i++) imgs.push(imgToDataURL(state.carImgs[i]));
+  await LibDB.save({
+    type: 'car2d',
+    name,
+    thumb: makeThumbnail(state.carImgs[state.carIndex]),
+    imgs,
+    timestamp: Date.now(),
+  });
+  renderLibraryUI();
+  notify(`"${name}" lagret i biblioteket`);
+}
+
+async function saveGLBToLibrary(file) {
+  const name = file.name.replace(/\.[^.]+$/, '');
+  const buffer = await file.arrayBuffer();
+  const thumb = makeThumbnail(state.carImgs[0]);
+  await LibDB.save({
+    type: 'glb',
+    name,
+    thumb,
+    data: buffer,
+    timestamp: Date.now(),
+  });
+  renderLibraryUI();
+  notify(`"${name}" lagret i biblioteket`);
+}
+
+function loadCar2dFromLibrary(item) {
+  let done = 0;
+  item.imgs.forEach((src, i) => {
+    if (!src) { done++; return; }
+    const img = new Image();
+    img.onload = () => {
+      state.carImgs[i] = img;
+      buildMasks(img, i);
+      if (++done === item.imgs.length) {
+        state.carIndex = 0;
+        updateCarThumbs();
+        resizeCanvas();
+        render2D();
+        notify(`"${item.name}" lastet inn`);
+      }
+    };
+    img.onerror = () => { if (++done === item.imgs.length) render2D(); };
+    img.src = src;
+  });
+}
+
+function loadGLBFromLibrary(item) {
+  notify(`Laster inn ${item.name}…`);
+  scene3d?.loadGLBFromBuffer(item.data, item.name);
+}
+
+async function deleteFromLibrary(id) {
+  await LibDB.delete(id);
+  renderLibraryUI();
+}
+
+function renderLibraryUI() {
+  const grid = document.getElementById('library-grid');
+  if (!grid) return;
+  LibDB.getAll().then(items => {
+    grid.innerHTML = '';
+    if (!items.length) {
+      grid.innerHTML = '<p class="lib-empty">Ingen lagrede elementer ennå</p>';
+      return;
+    }
+    items.sort((a, b) => b.timestamp - a.timestamp);
+    items.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'lib-card';
+      const badge = item.type === 'glb' ? '3D' : '2D';
+      card.innerHTML = `
+        <div class="lib-thumb" style="background-image:url('${item.thumb || ''}')">
+          <span class="lib-badge">${badge}</span>
+        </div>
+        <div class="lib-info">
+          <span class="lib-name">${item.name}</span>
+          <div class="lib-btns">
+            <button class="btn btn-secondary btn-xs lib-load" title="Last inn"><i class="fas fa-download"></i></button>
+            <button class="btn btn-ghost btn-xs lib-del" title="Slett"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>`;
+      card.querySelector('.lib-load').onclick = () => {
+        if (item.type === 'car2d') loadCar2dFromLibrary(item);
+        else loadGLBFromLibrary(item);
+      };
+      card.querySelector('.lib-del').onclick = () => deleteFromLibrary(item.id);
+      grid.appendChild(card);
+    });
+  });
+}
 
 // ═══════════════════════════════════════════════════════
 //  NOTIFICATION
@@ -1319,6 +1683,79 @@ function setupUI() {
   // ── car thumbnails ───────────────────────────────────
   updateCarThumbs();
 
+  // ── collapsible panels ───────────────────────────────
+  document.querySelectorAll('.sec-head').forEach(h => {
+    h.onclick = () => h.closest('.panel-section').classList.toggle('collapsed');
+  });
+
+  // ── wrap category tabs ───────────────────────────────
+  document.querySelectorAll('#wrap-tabs .tab-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('#wrap-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('[data-tab-pane]').forEach(p => p.classList.add('hidden'));
+      document.querySelector(`[data-tab-pane="${btn.dataset.tab}"]`).classList.remove('hidden');
+      // Hide gradient extra when switching tabs
+      document.getElementById('gradient-extra').classList.add('hidden');
+    };
+  });
+
+  // ── sticker categories with canvas previews ──────────
+  const STICKER_CATS = {
+    former:  [
+      { shape:'star',     label:'Stjerne'  },
+      { shape:'diamond',  label:'Diamant'  },
+      { shape:'circle',   label:'Sirkel'   },
+      { shape:'cross',    label:'Kryss'    },
+      { shape:'wave',     label:'Bølge'    },
+      { shape:'stripe-h', label:'Stripe'   },
+      { shape:'stripe-d', label:'Diagonal' },
+      { shape:'tribal',   label:'Tribal'   },
+      { shape:'infinity', label:'Uendelig' },
+      { shape:'arrow',    label:'Pil'      },
+    ],
+    figurer: [
+      { shape:'lightning', label:'Lyn'       },
+      { shape:'flame',     label:'Flamme'    },
+      { shape:'skull',     label:'Hodeskalle'},
+      { shape:'crown',     label:'Krone'     },
+      { shape:'heart',     label:'Hjerte'    },
+      { shape:'music',     label:'Musikk'    },
+      { shape:'shield',    label:'Skjold'    },
+      { shape:'flag',      label:'Flagg'     },
+      { shape:'paw',       label:'Pote'      },
+      { shape:'dragon',    label:'Drage'     },
+    ],
+  };
+
+  function buildStickerGrid(cat) {
+    const grid = document.getElementById(`sticker-grid-${cat}`);
+    if (!grid) return;
+    grid.innerHTML = '';
+    STICKER_CATS[cat].forEach(({ shape, label }) => {
+      const pv  = Object.assign(document.createElement('canvas'), { width: 36, height: 36 });
+      drawShape(pv.getContext('2d'), shape, 2, 2, 32, 32, '#9999dd');
+      const btn = document.createElement('button');
+      btn.className = 'sticker-btn'; btn.title = label; btn.dataset.sticker = shape;
+      const img = document.createElement('img'); img.src = pv.toDataURL(); img.alt = label;
+      btn.appendChild(img);
+      btn.onclick = () => {
+        const col = document.getElementById('sticker-color').value;
+        addDecal({ type:'sticker', w:130, h:130, data:{ shape, color:col } });
+        notify('Sticker lagt til — dra for å flytte');
+      };
+      grid.appendChild(btn);
+    });
+  }
+  buildStickerGrid('former');
+  buildStickerGrid('figurer');
+
+  document.getElementById('sticker-cat').onchange = e => {
+    const cat = e.target.value;
+    document.getElementById('sticker-grid-former').classList.toggle('hidden', cat !== 'former');
+    document.getElementById('sticker-grid-figurer').classList.toggle('hidden', cat !== 'figurer');
+  };
+
   // ── 2D view image upload ─────────────────────────────
   document.getElementById('btn-upload-2d').onclick = () =>
     document.getElementById('input-2d-img').click();
@@ -1333,8 +1770,9 @@ function setupUI() {
         state.carImgs[idx] = img;
         buildMasks(img, idx);
         updateCarThumbs();
+        scene3d?.rebuildPNGViews();  // show uploaded image as 3D plane too
         render2D();
-        notify(`2D-bilde oppdatert for visning ${idx + 1}`);
+        notify(`Bilde oppdatert — vises i både 2D og 3D`);
       };
       img.src = ev.target.result;
     };
@@ -1361,7 +1799,6 @@ function setupUI() {
     state.wrap.pattern=null; state.wrap.active=true;
     document.querySelectorAll('.pattern-btn').forEach(b=>b.classList.remove('active'));
     render2D(); notify('Wrap-farge lagt på');
-    if(state.viewMode==='3d') scene3d?.applyWrapColor(state.wrap.color);
   };
 
   // ── clear wrap ───────────────────────────────────────
@@ -1369,7 +1806,6 @@ function setupUI() {
     state.wrap.active=false; state.wrap.pattern=null; state.wrap.uploadedImg=null;
     document.querySelectorAll('.pattern-btn').forEach(b=>b.classList.remove('active'));
     render2D(); notify('Wrap fjernet');
-    if(state.viewMode==='3d') scene3d?.clearWrap();
   };
 
   // ── gradient controls ────────────────────────────────
@@ -1393,7 +1829,6 @@ function setupUI() {
       // Show gradient extra controls only for gradient pattern
       gradExtra.classList.toggle('hidden', btn.dataset.pattern !== 'gradient');
       render2D(); notify('Mønster: '+btn.dataset.pattern);
-      if(state.viewMode==='3d') scene3d?.applyWrapColor(state.wrap.color);
     };
   });
 
@@ -1458,17 +1893,24 @@ function setupUI() {
   document.querySelectorAll('.view-btn').forEach(btn=>{
     btn.onclick=()=>{
       const mode=btn.dataset.mode;
+      if (mode === state.viewMode) return;
       state.viewMode=mode;
       document.querySelectorAll('.view-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
       document.getElementById('viewer-2d').classList.toggle('active',mode==='2d');
       document.getElementById('viewer-3d').classList.toggle('active',mode==='3d');
-      if (mode==='2d') { resizeCanvas(); }
+      if (mode==='2d') {
+        // If GLB is loaded, re-capture fresh 2D views from the current 3D model
+        if (scene3d?._mode === 'glb' && scene3d._glbGroup) {
+          scene3d._captureViews();  // calls resizeCanvas + render2D at end
+        } else {
+          resizeCanvas();
+        }
+      }
       if (mode==='3d') {
-        // Wait for DOM reflow before reading clientWidth/Height
-        requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        requestAnimationFrame(() => {
           scene3d?.resize();
           scene3d?.syncWrap(state.wrap, state.decals, canvas.width, canvas.height);
-        }));
+        });
       }
     };
   });
@@ -1576,6 +2018,7 @@ function setupUI() {
     if (!f) return;
     notify(`Laster inn ${f.name}…`);
     scene3d?.loadGLBFromFile(f);
+    saveGLBToLibrary(f);
     e.target.value = '';
   };
 
@@ -1584,64 +2027,29 @@ function setupUI() {
     notify('Tilbake til standard bil');
   };
 
-  // Restore saved token
-  const savedTok = localStorage.getItem('sfToken');
-  if (savedTok) document.getElementById('sf-token').value = savedTok;
+  document.getElementById('btn-save-car').onclick = () => saveCarToLibrary();
 
-  async function doSfSearch() {
-    const q = document.getElementById('sf-query').value.trim();
-    if (!q) return;
-    const statusEl  = document.getElementById('sf-status');
-    const resultsEl = document.getElementById('sf-results');
-    statusEl.textContent = 'Søker Sketchfab…';
-    statusEl.classList.remove('hidden');
-    resultsEl.classList.add('hidden');
-    resultsEl.innerHTML = '';
-    try {
-      const models = await sfSearch(q);
-      statusEl.classList.add('hidden');
-      if (!models.length) { statusEl.textContent = 'Ingen resultater'; statusEl.classList.remove('hidden'); return; }
-      document.getElementById('sf-token-row').classList.remove('hidden');
-      document.getElementById('sf-browse-link').classList.remove('hidden');
-      models.forEach(m => {
-        const thumb = m.thumbnails?.images?.find(i => i.width >= 100)?.url
-                   || m.thumbnails?.images?.[0]?.url || '';
-        const card = document.createElement('div');
-        card.className = 'sf-card';
-        card.innerHTML = `<img src="${thumb}" alt=""><span title="${m.name}">${m.name}</span>`;
-        card.onclick = () => doSfLoad(m);
-        resultsEl.appendChild(card);
-      });
-      resultsEl.classList.remove('hidden');
-    } catch(err) {
-      statusEl.textContent = `Feil: ${err.message}`;
-    }
-  }
-
-  async function doSfLoad(model) {
-    const token = document.getElementById('sf-token').value.trim();
-    if (!token) {
-      notify('Lim inn Sketchfab API-token for å laste ned');
-      document.getElementById('sf-token').focus();
-      return;
-    }
-    localStorage.setItem('sfToken', token);
-    notify(`Laster ned "${model.name}"…`);
-    try {
-      const glbUrl = await sfDownloadUrl(model.uid, token);
-      const resp   = await fetch(glbUrl);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const blob   = await resp.blob();
-      scene3d?.loadGLBFromFile(new File([blob], model.name + '.glb', { type:'model/gltf-binary' }));
-      notify(`"${model.name}" lagt inn!`);
-    } catch(err) {
-      notify(`Feil: ${err.message}`);
-      console.error('Sketchfab last ned feil:', err);
-    }
-  }
-
-  document.getElementById('btn-sf-search').onclick = doSfSearch;
-  document.getElementById('sf-query').onkeydown = e => { if (e.key === 'Enter') doSfSearch(); };
+  // ── floating decal toolbar ───────────────────────────
+  document.getElementById('dtb-confirm').onclick = () => {
+    state.selId = null; render2D(); updateList();
+  };
+  document.getElementById('dtb-delete').onclick = () => {
+    delDecal(state.selId);
+  };
+  document.getElementById('dtb-smaller').onclick = () => {
+    const d = state.decals.find(d => d.id === state.selId); if (!d) return;
+    const f = 0.8;
+    d.x += d.w * (1 - f) / 2; d.y += d.h * (1 - f) / 2;
+    d.w *= f; d.h *= f;
+    render2D(); updateList();
+  };
+  document.getElementById('dtb-bigger').onclick = () => {
+    const d = state.decals.find(d => d.id === state.selId); if (!d) return;
+    const f = 1.25;
+    d.x -= d.w * (f - 1) / 2; d.y -= d.h * (f - 1) / 2;
+    d.w *= f; d.h *= f;
+    render2D(); updateList();
+  };
 
   // hint auto-hide
   setTimeout(()=>document.getElementById('canvas-hint')?.classList.add('hidden'),7000);
@@ -1665,6 +2073,15 @@ function renderToAlphaMask(srcCanvas) {
   }
   ctx.putImageData(d, 0, 0);
   return out;
+}
+
+// Sync the "2D/3D — [model]" badges in both viewers
+function updateBadges() {
+  const name = document.getElementById('model-name')?.textContent || 'Bil';
+  ['badge-car-2d','badge-car-3d'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = name;
+  });
 }
 
 // Refresh the car-thumb strip from whatever is currently in state.carImgs
@@ -1758,6 +2175,7 @@ class Scene3D {
       document.getElementById('model-loading')?.classList.add('hidden');
       const nameEl = document.getElementById('model-name');
       if (nameEl) nameEl.textContent = name;
+      updateBadges();
       this.syncWrap(state.wrap, state.decals, canvas.width, canvas.height);
       if (onDone) onDone();
     }, undefined, err => {
@@ -1773,8 +2191,42 @@ class Scene3D {
     this.loadGLB(url, name, () => URL.revokeObjectURL(url));
   }
 
+  loadGLBFromBuffer(buffer, name) {
+    const blob = new Blob([buffer], { type: 'model/gltf-binary' });
+    const url  = URL.createObjectURL(blob);
+    this.loadGLB(url, name || 'Modell', () => URL.revokeObjectURL(url));
+  }
+
   resetToDefault() {
     this.loadGLB('3d/2021_pandem_gr86_v1_aero_kit.glb', 'GR86 Pandem');
+  }
+
+  // Switch to PNG-plane mode from uploaded 2D images
+  rebuildPNGViews() {
+    // Remove and dispose old planes
+    this._planes.forEach(p => { this.scene.remove(p); p.geometry.dispose(); });
+    this._planeMats.forEach(m => { m.map?.dispose(); m.dispose(); });
+    this._planes       = [];
+    this._viewCanvases = [];
+    this._viewCtxs     = [];
+    this._planeMats    = [];
+    this._tmp    = null;
+    this._tmpCtx = null;
+
+    // Hide any loaded GLB model
+    if (this._glbGroup) this._glbGroup.visible = false;
+
+    // Rebuild plane set from current state.carImgs
+    this._buildViews();
+    this._mode = 'png';
+
+    // Update model-name badge
+    const nameEl = document.getElementById('model-name');
+    if (nameEl) nameEl.textContent = 'Egne bilder';
+    updateBadges();
+
+    // Apply current wrap/decals to the new planes
+    this.syncWrap(state.wrap, state.decals, canvas.width, canvas.height);
   }
 
   // ─────────────────────────────────────────────────────
@@ -1794,8 +2246,8 @@ class Scene3D {
                        -center.y * scale + (size.y * scale) / 2,
                        -center.z * scale);
 
-    // Identify body-panel meshes (skip glass, lights, tires, chrome…)
-    const skipRx = /glass|window|wind|screen|lens|light|lamp|indicator|bulb|rubber|tire|tyre|rim|mirror|chrome|exhaust|interior|seat|carpet/i;
+    // Identify body-panel meshes (skip glass, lights, tires, wheels, chrome…)
+    const skipRx = /glass|window|wind|screen|lens|light|lamp|indicator|bulb|rubber|tire|tyre|rim|wheel|brake|disc|caliper|hub|axle|rotor|suspension|spring|shock|mirror|chrome|exhaust|muffler|interior|seat|carpet|floor|pedal|steering|dash|gauge/i;
     this._bodyMeshes = [];
     this._origMats   = [];
 
@@ -1837,17 +2289,19 @@ class Scene3D {
   // ─────────────────────────────────────────────────────
   syncWrap(wrapState, decals, canW, canH) {
     if (this._mode === 'glb') {
-      this._syncWrapGLB(wrapState);
+      this._syncWrapGLB(wrapState, decals);
     } else {
       this._syncWrapPNG(wrapState, decals, canW, canH);
     }
   }
 
-  // Apply wrap as a UV-mapped canvas texture on all body meshes
-  _syncWrapGLB(wrapState) {
+  // Apply wrap + decals as a UV-mapped canvas texture on all body meshes
+  _syncWrapGLB(wrapState, decals) {
     if (!this._bodyMeshes.length) return;
 
-    if (!wrapState.active) {
+    const hasDecals = decals && decals.some(d => d.opacity > 0);
+
+    if (!wrapState.active && !hasDecals) {
       this._bodyMeshes.forEach((m, i) => { m.material = this._origMats[i]; });
       return;
     }
@@ -1860,12 +2314,42 @@ class Scene3D {
       this._wrapTex.wrapS = this._wrapTex.wrapT = THREE.RepeatWrapping;
     }
 
-    const c = this._wrapTexCtx, W = 2048, H = 2048;
+    const c = this._wrapTexC.getContext('2d'), W = 2048, H = 2048;
     c.clearRect(0, 0, W, H);
-    c.save();
-    c.globalAlpha = wrapState.opacity;
-    drawWrapToCtx(c, { x:0, y:0, w:W, h:H });
-    c.restore();
+
+    // ── wrap layer ──
+    if (wrapState.active) {
+      c.save();
+      c.globalAlpha = wrapState.opacity;
+      drawWrapToCtx(c, { x:0, y:0, w:W, h:H });
+      c.restore();
+    }
+
+    // ── decals — remap from 2D canvas coords to UV texture coords ──
+    if (hasDecals) {
+      const r = carRect();           // car rect in 2D canvas space
+      if (r.w > 0 && r.h > 0) {
+        const sx = W / r.w, sy = H / r.h;
+        decals.forEach(d => {
+          if (d.opacity === 0) return;
+          c.save();
+          c.globalAlpha = d.opacity ?? 1;
+          const td = {
+            ...d,
+            x:    (d.x - r.x) * sx,
+            y:    (d.y - r.y) * sy,
+            w:    d.w * sx,
+            h:    d.h * sy,
+            data: d.type === 'text'
+              ? { ...d.data, size: Math.round(d.data.size * sx) }
+              : d.data,
+          };
+          drawDecalToCtx(c, td);
+          c.restore();
+        });
+      }
+    }
+
     this._wrapTex.needsUpdate = true;
 
     this._bodyMeshes.forEach(mesh => {
@@ -1927,7 +2411,7 @@ class Scene3D {
 
     const W = 1200, H = 520;
     const off = Object.assign(document.createElement('canvas'), { width: W, height: H });
-    const tmpR = new THREE.WebGLRenderer({ canvas: off, antialias: true, preserveDrawingBuffer: true });
+    const tmpR = new THREE.WebGLRenderer({ canvas: off, antialias: true, preserveDrawingBuffer: true, alpha: true });
     tmpR.setSize(W, H);
     tmpR.toneMapping       = THREE.ACESFilmicToneMapping;
     tmpR.toneMappingExposure = 1.1;
@@ -1949,11 +2433,11 @@ class Scene3D {
       new THREE.Vector3(-dist,eyeY,   0  ),  // left
     ];
 
-    // Non-model scene children to hide during mask renders (keep lights)
-    const extras = this.scene.children.filter(
-      c => c !== this._glbGroup &&
-           !(c instanceof THREE.Light)
+    // Non-model scene children to hide during renders (floor, grid, PNG planes — not lights)
+    const extras    = this.scene.children.filter(
+      c => c !== this._glbGroup && !(c instanceof THREE.Light)
     );
+    const extrasWas = extras.map(c => c.visible);   // snapshot so planes stay hidden after
 
     const whiteMat  = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
     const newImgs   = [];
@@ -1965,9 +2449,9 @@ class Scene3D {
       cam.lookAt(tgt);
       cam.updateProjectionMatrix();
 
-      // ① Normal render (scene bg #0d0d18)
-      extras.forEach(c => { c.visible = true; });
-      tmpR.setClearColor(0x0d0d18, 1);
+      // ① Normal render — transparent bg, no floor/grid so car floats cleanly
+      extras.forEach(c => { c.visible = false; });
+      tmpR.setClearColor(0x000000, 0);
       tmpR.render(this.scene, cam);
 
       const imgC = document.createElement('canvas');
@@ -1977,8 +2461,7 @@ class Scene3D {
       img.src = imgC.toDataURL('image/png');
       newImgs[vi] = img;
 
-      // Hide extras for mask renders
-      extras.forEach(c => { c.visible = false; });
+      // ② / ③ mask renders — opaque black bg (brightness → alpha in renderToAlphaMask)
       tmpR.setClearColor(0x000000, 1);
 
       // ② White body mask (body meshes = white, rest hidden)
@@ -2008,16 +2491,17 @@ class Scene3D {
       // Restore
       this._bodyMeshes.forEach((m, j) => { m.material = savedBodyMats[j]; });
       allMeshData.forEach(({ c, vis, mat }) => { c.visible = vis; c.material = mat; });
-      extras.forEach(c => { c.visible = true; });
+      extras.forEach((c, i) => { c.visible = extrasWas[i]; });  // restore original visibility
     });
 
     tmpR.dispose();
 
     // Push into state and refresh 2D
     for (let i = 0; i < 4; i++) {
-      state.carImgs[i]   = newImgs[i];
-      state.whiteMask[i] = newWMasks[i];
-      state.carMask[i]   = newCMasks[i];
+      state.carImgs[i]    = newImgs[i];
+      state.whiteMask[i]  = newWMasks[i];
+      state.carMask[i]    = newCMasks[i];
+      state.panelMask[i]  = newWMasks[i]; // body meshes already exclude tires/glass
     }
     state.carIndex = 0;
     updateCarThumbs();
@@ -2095,13 +2579,13 @@ class Scene3D {
   _syncWrapPNG(wrapState, decals, canW, canH) {
     const imgs = state.carImgs;
     const img0 = imgs.find(Boolean);
-    if (!img0 || !this._viewCanvases.length) return;
+    if (!img0 || !img0.naturalWidth || !img0.naturalHeight || !this._viewCanvases.length) return;
 
     // The 2D canvas fit-contains the car image; recover that transform so
     // decal coords (in 2D canvas px) can be mapped to image/texture space.
     const imgW = img0.naturalWidth, imgH = img0.naturalHeight;
     let scale2d = 1, ox2d = 0, oy2d = 0;
-    if (canW > 0 && canH > 0) {
+    if (canW > 0 && canH > 0 && imgW > 0 && imgH > 0) {
       scale2d = Math.min(canW / imgW, canH / imgH);
       ox2d    = (canW - imgW * scale2d) / 2;
       oy2d    = (canH - imgH * scale2d) / 2;
@@ -2147,7 +2631,7 @@ class Scene3D {
 
       // ③ Decals — inverse the 2D fit-contain transform to get texture coords
       if (decals && scale2d > 0) {
-        const cm = state.carMask[i];
+        const pm3 = state.panelMask[i];
         decals.forEach(d => {
           if (d.opacity === 0) return;
           tc.clearRect(0, 0, W, H);
@@ -2162,9 +2646,9 @@ class Scene3D {
 
           drawDecalToCtx(tc, { ...d, x:tx, y:ty, w:tw, h:th, data:tdata });
 
-          if (cm) {
+          if (pm3) {
             tc.globalCompositeOperation = 'destination-in';
-            tc.drawImage(cm, 0, 0, W, H);
+            tc.drawImage(pm3, 0, 0, W, H);
             tc.globalCompositeOperation = 'source-over';
           }
           cx.globalAlpha = d.opacity ?? 1;
@@ -2214,30 +2698,6 @@ class Scene3D {
   }
 }
 
-// ═══════════════════════════════════════════════════════
-//  SKETCHFAB API  (search = no-auth; download = API token)
-// ═══════════════════════════════════════════════════════
-async function sfSearch(query) {
-  const url = `https://api.sketchfab.com/v3/search?type=models&downloadable=true&count=8&q=${encodeURIComponent(query)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Sketchfab ${res.status}`);
-  const data = await res.json();
-  return data.results || [];
-}
-
-async function sfDownloadUrl(uid, token) {
-  const res = await fetch(`https://api.sketchfab.com/v3/models/${uid}/download`, {
-    headers: { 'Authorization': `Token ${token}` },
-  });
-  if (!res.ok) {
-    const msg = await res.json().catch(() => ({}));
-    throw new Error(msg.detail || `HTTP ${res.status}`);
-  }
-  const data = await res.json();
-  const u = data.glb?.url || data.source?.url;
-  if (!u) throw new Error('Ingen GLB tilgjengelig for denne modellen');
-  return u;
-}
 
 // ═══════════════════════════════════════════════════════
 //  INIT
@@ -2263,6 +2723,8 @@ function onReady(){
   setupUI();
   render2D();
   updateList();
+  updateBadges();
+  renderLibraryUI();
 
   // Init Three.js
   scene3d=new Scene3D(document.getElementById('canvas-3d'));
